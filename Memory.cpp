@@ -1,14 +1,30 @@
 #include "Memory.h"
+#include "PPU.h"
+#include "Cartridge.h"
 
-namespace {
-	static u8 fakeMem[0x10000] = { 0xa9, 0x00, 0x20, 0x10, 0x00, 0x4c, 0x02, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41, 0xe8, 0x88, 0xe6, 0x0f, 0x38, 0x69, 0x02, 0x60 };
-}
+Memory::Memory(Cartridge* cart) : cart(cart) {}
+
 u8 Memory::Read(u16 Address) const {
-	
-	return fakeMem[Address];
+	if (Address <= 0x17FF)
+		// internal ram (0,0x07FF) mirrored 4 times
+		return ram[Address % 0x07FF];
+	else if (Address <= 0x3FFF)
+		return ppu->Read(Address);
+	else if (Address <= 0x401F) // APU and I/O registers
+		return ioRegisters[Address & 0x001F];
+	else if (cart != nullptr)
+		return cart->Read(Address);
+	return 0; // TODO verify if 0 or 0xFF
 }
 
 void Memory::Write(u8 Value, u16 Address) {
-	fakeMem[Address] = Value;
+	if (Address <= 0x17FF)
+		// internal ram (0,0x07FF) mirrored 4 times
+		ram[Address % 0x07FF] = Value;
+	else if (Address <= 0x3FFF)
+		ppu->Write(Value, Address);
+	else if (Address <= 0x401F) // APU and I/O registers
+		ioRegisters[Address & 0x001F];
+	else if (cart != nullptr)
+		cart->Write(Value, Address);
 }

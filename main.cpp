@@ -1,12 +1,28 @@
+#include <iostream>
+
 #include "Window.h"
 #include "StateWindow.h"
 
-#include "Memory.h"
+#include "Cartridge.h"
 #include "CPU.h"
+#include "Memory.h"
 
-int main(int argc, char* argv) {
-    Memory memory;
+int main(int argc, char* argv[]) {
+    std::string romPath;
+    std::string romDir;
+    std::string romName;
+    std::string gameName;
+
+    romPath = argv[1];
+    size_t slashPosition = romPath.find_last_of("/");
+    romDir = romPath.substr(0, slashPosition + 1);
+    romName = romPath.substr(slashPosition + 1);
+    std::cout << "Loading rom " << romPath << std::endl;
+
+    Cartridge cart(romPath);
+    Memory memory(&cart);
     CPU cpu(memory);
+    memory.cpu = &cpu;
 
     StateWindow stateWindow(cpu);
 	std::vector<Window*> debugWindows;
