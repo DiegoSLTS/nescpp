@@ -34,7 +34,7 @@ protected:
     int xPosition;
     int yPosition;
 
-    sf::Uint8* screenArray = nullptr;
+    sf::Uint32* screenArray = nullptr;
     sf::Texture screenTexture;
     sf::Sprite screenSprite;
 

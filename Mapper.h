@@ -18,7 +18,7 @@ enum TVMode {
 };
 
 enum ConsoleType {
-	NES,
+	BaseNES,
 	VSSystem,
 	Playchoice,
 	Other
@@ -94,7 +94,11 @@ public:
 	virtual u8 Read(u16 address) = 0;
 	virtual void Write(u8 value, u16 address) = 0;
 
+	virtual u8 ReadChr(u16 address) = 0;
+
 	virtual void InitArrays(const char* fileContent);
+
+	virtual MirroringMode GetMirroring() const = 0;
 
 protected:
 	const Header& header;
@@ -112,4 +116,8 @@ public:
 
 	virtual u8 Read(u16 address) override;
 	virtual void Write(u8 value, u16 address) override;
+
+	virtual u8 ReadChr(u16 address) override;
+
+	virtual MirroringMode GetMirroring() const;
 };

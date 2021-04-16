@@ -106,15 +106,15 @@ void Mapper::InitArrays(const char* fileContent) {
 Mapper0::Mapper0(const Header& header, const char* fileContent) : Mapper(header, fileContent) {}
 
 u8 Mapper0::Read(u16 address) {
-	if (address < 0x6000) {
+	if (address < 0x6000)
 		return 0; // invalid?
-	} else if (address < 0x8000) {
+	else if (address < 0x8000) {
 		if (prgRam != nullptr)
 			return prgRam[address - 0x6000];
 	} else {
 		address -= 0x8000;
 		if (header.PrgROMUnits == 1)
-			address |= 0x7FFF; // faster than % 0x4000
+			address &= 0x3FFF; // faster than % 0x4000
 		return prgRom[address];
 	}
 
@@ -122,7 +122,17 @@ u8 Mapper0::Read(u16 address) {
 }
 
 void Mapper0::Write(u8 value, u16 address) {
-	if (address >= 0x6000 && address < 0x8000 && prgRam != nullptr) {
+	if (address >= 0x6000 && address < 0x8000 && prgRam != nullptr)
 		prgRam[address - 0x6000] = value;
-	}
+}
+
+u8 Mapper0::ReadChr(u16 address) {
+	if (address < 0x2000)
+		return chrRom[address];
+
+	return 0;
+}
+
+MirroringMode Mapper0::GetMirroring() const {
+	return header.Mirroring;
 }

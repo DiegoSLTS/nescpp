@@ -11,6 +11,10 @@ public:
 	u8 Read(u16 address);
 	void Write(u8 value, u16 address);
 
+	u8 ReadChr(u16 address);
+
+	MirroringMode GetMirroring() const;
+
 private:
 	Header header;
 	Mapper* mapper = nullptr;

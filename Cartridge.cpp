@@ -156,7 +156,7 @@ void Cartridge::LoadFile(const std::string& path) {
             if (fileSize > 0) {
                 readStream.seekg(0, std::ios::beg);
 
-                char* fileContent = new char[(u32)fileSize];
+                fileContent = new char[(u32)fileSize];
                 readStream.read(fileContent, fileSize);
             } else
                 std::cout << "ERROR: Rom file is empty " << path << std::endl;
@@ -195,4 +195,15 @@ u8 Cartridge::Read(u16 address) {
 void Cartridge::Write(u8 value, u16 address) {
     if (mapper != nullptr)
         mapper->Write(value, address);
+}
+
+u8 Cartridge::ReadChr(u16 address) {
+    if (mapper == nullptr)
+        return 0;
+
+    return mapper->ReadChr(address);
+}
+
+MirroringMode Cartridge::GetMirroring() const {
+    return mapper->GetMirroring();
 }

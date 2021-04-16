@@ -2,10 +2,11 @@
 
 Window::Window(unsigned int Width, unsigned int Height, const std::string& Title, const int XPosition, const int YPosition, bool Open, bool scale)
     : width(Width), height(Height), title(Title), xPosition(XPosition), yPosition(YPosition), scale(scale) {
-	screenArray = new sf::Uint8[width * height * 4];
+	screenArray = new sf::Uint32[width * height];
+    memset(screenArray, 0, width * height * 4);
 
 	screenTexture.create(width, height);
-	screenTexture.update(screenArray);
+	screenTexture.update((sf::Uint8*)screenArray);
 
 	screenSprite.setTexture(screenTexture, true);
 	screenSprite.setPosition(0.0f, 0.0f);
@@ -83,13 +84,16 @@ void Window::SetTitle(const std::string& newTitle) {
 }
 
 void Window::Update() {
+    if (!IsOpen())
+        return;
+
     renderWindow->clear();
     RenderContent();
     renderWindow->display();
 }
 
 void Window::RenderContent() {
-    screenTexture.update(screenArray);
+    screenTexture.update((sf::Uint8*)screenArray);
     screenSprite.setTexture(screenTexture, true);
     renderWindow->draw(screenSprite);
 }

@@ -1,6 +1,6 @@
 #include "StateWindow.h"
 
-#include "CPU.h"
+#include "NES.h"
 #include "Types.h"
 
 namespace {
@@ -45,7 +45,7 @@ namespace {
 	};
 }
 
-StateWindow::StateWindow(CPU& cpu) : Window(250, 144, "State", 400, 50, true, false), cpu(cpu) {
+StateWindow::StateWindow(NES& nes) : Window(250, 144, "State", 550, 50, false, false), cpu(nes.cpu) {
 	if (!font.loadFromFile("Pokemon_GB.ttf"))
 	{
 		// TODO log error

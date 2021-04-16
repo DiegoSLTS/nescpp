@@ -3,11 +3,12 @@
 #include "Types.h"
 #include "Window.h"
 
+class NES;
 class CPU;
 
 class StateWindow : public Window {
 public:
-	StateWindow(CPU& gameBoy);
+	StateWindow(NES& nes);
 	virtual ~StateWindow();
 
 	virtual void RenderContent() override;

@@ -1,11 +1,91 @@
 #include "CPU.h"
+
+#include "NES.h"
+#include "PPU.h"
 #include "Memory.h"
 
-CPU::CPU(Memory& memory) : memory(memory) {}
+namespace {
+	std::string inst[256] = {
+		//        0     1     2     3     4     5     6     7     8     9     A     B     C     D     E     F
+		/* 0 */	"BRK","ORA","___","___","___","ORA","ASL","___","PHP","ORA","ASL","___","___","ORA","ASL","___",
+		/* 1 */	"BPL","ORA","___","___","___","ORA","ASL","___","CLC","ORA","___","___","___","ORA","ASL","___",
+		/* 2 */	"JSR","AND","___","___","BIT","AND","ROL","___","PLP","AND","ROL","___","BIT","AND","ROL","___",
+		/* 3 */	"BMI","AND","___","___","___","AND","ROL","___","SEC","AND","___","___","___","AND","ROL","___",
+		/* 4 */	"RTI","EOR","___","___","___","EOR","LSR","___","PHA","EOR","LSR","___","JMP","EOR","LSR","___",
+		/* 5 */	"BVC","EOR","___","___","___","EOR","LSR","___","CLI","EOR","___","___","___","EOR","LSR","___",
+		/* 6 */	"RTS","ADC","___","___","___","ADC","ROR","___","PLA","ADC","ROR","___","JMP","ADC","ROR","___",
+		/* 7 */	"BVS","ADC","___","___","___","ADC","ROR","___","SEI","ADC","___","___","___","ADC","ROR","___",
+		/* 8 */	"___","STA","___","___","STY","STA","STX","___","DEY","___","TXA","___","STY","STA","STX","___",
+		/* 9 */	"BCC","STA","___","___","STY","STA","STX","___","TYA","STA","TXS","___","___","STA","___","___",
+		/* A */	"LDY","LDA","LDX","___","LDY","LDA","LDX","___","TAY","LDA","TAX","___","LDY","LDA","LDX","___",
+		/* B */	"BCS","LDA","___","___","LDY","LDA","LDX","___","CLV","LDA","TSX","___","LDY","LDA","LDX","___",
+		/* C */	"CPY","CMP","___","___","CPY","CMP","DEC","___","INY","CMP","DEX","___","CPY","CMP","DEC","___",
+		/* D */	"BNE","CMP","___","___","___","CMP","DEC","___","CLD","CMP","___","___","___","CMP","DEC","___",
+		/* E */	"CPX","SBC","___","___","CPX","SBC","INC","___","INX","SBC","NOP","___","CPX","SBC","INC","___",
+		/* F */	"BEQ","SBC","___","___","___","SBC","INC","___","SED","SBC","___","___","___","SBC","INC","___"
+	};
+}
+
+CPU::CPU(Memory& memory) : memory(memory) {
+	logFile.open("cpu.log", std::ofstream::out | std::ofstream::trunc);
+	log = false;
+	//log = true;
+}
+
+CPU::~CPU() {
+	logFile.close();
+}
+
+void CPU::DumpLogs() {
+	if (!log)
+		return;
+
+	logFile << logStrings.str();
+	logStrings.str(std::string());
+}
+
+void CPU::Reset() {
+	P |= 0x04;
+	S -= 3;
+	CountCycles(7);
+	PC = Read(0xFFFC) | (Read(0xFFFD) << 8);
+}
 
 void CPU::Update() {
+	lastOpCycles = 0;
+	if (dmaInProgress) {
+		dmaCycles++;
+
+		if ((dmaCycles & 0x01) == 0) // make sure 514 does not override sprite at 0
+			ppu->Write(memory.Read(dmaAddress++), 0x2004);
+
+		if (dmaCycles == 513) { // TODO 514 in some cases
+			dmaInProgress = false;
+			if (log) logFile << "OAMDMA Finished" << std::endl;
+		}
+
+		CountCycles(1);
+		return;
+	}
+
+	if (NMIRequested) {
+		if (log) logFile << "NMI ";
+		BRK(0xFFFA, true);
+		NMIRequested = false;
+	}
+
+	if (PC == 0xce1e)
+		int a = 0;
+
 	u8 opCode = ReadAtPC();
 	ExecuteOpCode(opCode);
+}
+
+void CPU::StartOAMDMA(u8 page) {
+	dmaInProgress = true;
+	dmaCycles = 0;
+	dmaAddress = page << 8;
+	if (log) logFile << std::endl << "OAMDMA Started from " << ToHex(dmaAddress) << std::endl;
 }
 
 void CPU::SetFlag(Flag flagBit, bool set) {
@@ -21,6 +101,7 @@ bool CPU::HasFlag(Flag flagBit) const {
 
 void CPU::CountCycles(u8 cycles) {
 	lastOpCycles += cycles;
+	if (nes->cycleAccurate) nes->DoCycles(cycles);
 }
 
 u8 CPU::ReadAtPC() {
@@ -38,38 +119,67 @@ void CPU::Write(u8 value, u16 address) {
 	CountCycles(1);
 }
 
+u8 CPU::Peak8(u16 address) {
+	return memory.Read(address);
+}
+
+u16 CPU::Peak16(u16 address) {
+	u8 lsb = Peak8(address);
+	u8 msb = Peak8(address + 1);
+
+	return (msb << 8) | lsb;
+}
+
 u8 CPU::PeakOpCode() {
-	return memory.Read(PC);
+	return Peak8(PC);
 }
 
 u8 CPU::PeakOperand8() {
-	return memory.Read(PC + 1);
+	return Peak8(PC + 1);
 }
 
 u16 CPU::PeakOperand16() {
-	return (memory.Read(PC + 2) << 8) | PeakOperand8();
+	return Peak16(PC + 1);
+}
+
+u16 CPU::MakeImmediate() {
+	if (log) logFile << "#$" << ToHex(Peak8(PC));
+	return PC++;
+}
+
+u16 CPU::MakeRelative() {
+	if (log) logFile << "*" << (s16)((s8)Peak8(PC));
+	return PC++;
 }
 
 u16 CPU::MakeZeroPage() {
+	if (log) logFile << "$" << ToHex(Peak8(PC));
 	return ReadAtPC();
 }
 
 u16 CPU::MakeZeroPageX() {
+	if (log) logFile << "$" << ToHex(Peak8(PC)) << ",X";
 	u16 address = (ReadAtPC() + X) & 0x00FF;
+	if (log) logFile << " ADD = " << ToHex(address);
 	CountCycles(1);
 	return address;
 }
 
 u16 CPU::MakeZeroPageY() {
-	return (ReadAtPC() + Y) & 0x00FF;
+	if (log) logFile << "$" << ToHex(Peak8(PC)) << ",Y";
+	u16 address = (ReadAtPC() + Y) & 0x00FF;
+	if (log) logFile << " ADD = " << ToHex(address);
+	return address;
 }
 
 u16 CPU::MakeAbsolute() {
+	if (log) logFile << "$" << ToHex(Peak16(PC));
 	return ReadAtPC() | (ReadAtPC() << 8);
 }
 
 u16 CPU::MakeAbsoluteX() {
 	u16 address = MakeAbsolute() + X;
+	if (log) logFile << ",X ADD = " << ToHex(address);
 	// if lsb of address is less than X it means it carried to msb
 	// so we have to wait one extra cycle
 	if ((address & 0xFF) < X)
@@ -79,6 +189,7 @@ u16 CPU::MakeAbsoluteX() {
 
 u16 CPU::MakeAbsoluteY() {
 	u16 address = MakeAbsolute() + Y;
+	if (log) logFile << ",Y ADD = " << ToHex(address);
 	// if lsb of address is less than Y it means it carried to msb
 	// so we have to wait one extra cycle
 	if ((address & 0xFF) < Y)
@@ -87,6 +198,7 @@ u16 CPU::MakeAbsoluteY() {
 }
 
 u16 CPU::MakeIndirect() {
+	if (log) logFile << "($" << ToHex(Peak16(PC)) << ")";
 	// If absAddressLsb is 0xFF there's no carry to absAddressMsb so absAddress breaks
 	// I handle absAddressLsb++ in a byte so it wraps to 0 to simulate the bug
 	u8 absAddressLsb = ReadAtPC();
@@ -94,19 +206,30 @@ u16 CPU::MakeIndirect() {
 	u8 addressLsb = Read((absAddressMsb << 8) | (absAddressLsb++));
 	u8 addressMsb = Read((absAddressMsb << 8) | absAddressLsb);
 
-	return (addressMsb << 8) | addressLsb;
+	u16 address = (addressMsb << 8) | addressLsb;
+	if (log) logFile << " ADD = " << ToHex(address);
+	return address;
 }
 
 u16 CPU::MakeIndirectX() {
+	if (log) logFile << "($" << ToHex(Peak8(PC)) << ",X)";
 	u16 zpAddress = (ReadAtPC() + X) & 0x00FF;
 	CountCycles(1);
-	return Read(zpAddress) | (Read(zpAddress + 1) << 8);
+	u8 lsb = Read(zpAddress);
+	u8 msb = Read(zpAddress + 1);
+	u16 address = (msb << 8) | lsb;
+	if (log) logFile << " ADD = " << ToHex(address);
+	return address;
 }
 
 u16 CPU::MakeIndirectY() {
+	if (log) logFile << "($" << ToHex(Peak8(PC)) << "),Y";
 	u16 zpAddress = ReadAtPC();
-	u16 address = Read(zpAddress) | (Read(zpAddress + 1) << 8);
+	u8 lsb = Read(zpAddress);
+	u8 msb = Read((zpAddress + 1) & 0xFF);
+	u16 address = (msb << 8) | lsb;
 	address += Y;
+	if (log) logFile << " ADD = " << ToHex(address);
 	// if lsb of address is less than Y it means it carried to msb
 	// so we have to wait one extra cycle
 	if ((address & 0xFF) < Y)
@@ -129,18 +252,24 @@ void CPU::IncS() {
 }
 
 u8 CPU::Pull8() {
+	S++;
+	CountCycles(1);
 	// Incrementing S after reading
 	// Instructions that pull must call IncS once before multiple Pulls
-	return Read(0x0100 | (S++));
+	return Read(0x0100 | S);
 }
 
 u16 CPU::Pull16() {
-	return Pull8() | (Pull8() << 8);
+	u8 lsb = Pull8();
+	u8 msb = Pull8();
+	return (msb << 8) | lsb;
 }
 
 void CPU::ExecuteOpCode(u8 opCode) {
+	u8 tempP = P, tempS = S, tempA = A, tempX = X, tempY = Y;
+	if (log) logFile << ToHex((u16)(PC - 1)) << ": " << inst[opCode] << " ";
 	switch (opCode) {
-	case 0x69: ADC(ReadAtPC()); break;
+	case 0x69: ADC(Read(MakeImmediate())); break;
 	case 0x65: ADC(Read(MakeZeroPage())); break;
 	case 0x75: ADC(Read(MakeZeroPageX())); break;
 	case 0x6D: ADC(Read(MakeAbsolute())); break;
@@ -148,7 +277,7 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0x79: ADC(Read(MakeAbsoluteY())); break;
 	case 0x61: ADC(Read(MakeIndirectX())); break;
 	case 0x71: ADC(Read(MakeIndirectY())); break;
-	case 0x29: AND(ReadAtPC()); break;
+	case 0x29: AND(Read(MakeImmediate())); break;
 	case 0x25: AND(Read(MakeZeroPage())); break;
 	case 0x35: AND(Read(MakeZeroPageX())); break;
 	case 0x2D: AND(Read(MakeAbsolute())); break;
@@ -161,14 +290,14 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0x16: ASL(MakeZeroPageX()); break;
 	case 0x0E: ASL(MakeAbsolute()); break;
 	case 0x1E: ASL(MakeAbsoluteX()); break; // TODO 7 cycles always, doesn't care about crossing pages
-	case 0x90: BCC(ReadAtPC()); break;
-	case 0xB0: BCS(ReadAtPC()); break;
-	case 0xF0: BEQ(ReadAtPC()); break;
-	case 0xD0: BNE(ReadAtPC()); break;
-	case 0x30: BMI(ReadAtPC()); break;
-	case 0x10: BPL(ReadAtPC()); break;
-	case 0x50: BVC(ReadAtPC()); break;
-	case 0x70: BVS(ReadAtPC()); break;
+	case 0x90: BCC(Read(MakeRelative())); break;
+	case 0xB0: BCS(Read(MakeRelative())); break;
+	case 0xF0: BEQ(Read(MakeRelative())); break;
+	case 0xD0: BNE(Read(MakeRelative())); break;
+	case 0x30: BMI(Read(MakeRelative())); break;
+	case 0x10: BPL(Read(MakeRelative())); break;
+	case 0x50: BVC(Read(MakeRelative())); break;
+	case 0x70: BVS(Read(MakeRelative())); break;
 	case 0x24: BIT(Read(MakeZeroPage())); break;
 	case 0x2C: BIT(Read(MakeAbsolute())); break;
 	case 0x00: BRK(); break;
@@ -176,7 +305,7 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0xD8: CLD(); break;
 	case 0x58: CLI(); break;
 	case 0xB8: CLV(); break;
-	case 0xC9: CMP(ReadAtPC()); break;
+	case 0xC9: CMP(Read(MakeImmediate())); break;
 	case 0xC5: CMP(Read(MakeZeroPage())); break;
 	case 0xD5: CMP(Read(MakeZeroPageX())); break;
 	case 0xCD: CMP(Read(MakeAbsolute())); break;
@@ -184,10 +313,10 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0xD9: CMP(Read(MakeAbsoluteY())); break;
 	case 0xC1: CMP(Read(MakeIndirectX())); break;
 	case 0xD1: CMP(Read(MakeIndirectY())); break;
-	case 0xE0: CPX(ReadAtPC()); break;
+	case 0xE0: CPX(Read(MakeImmediate())); break;
 	case 0xE4: CPX(Read(MakeZeroPage())); break;
 	case 0xEC: CPX(Read(MakeAbsolute())); break;
-	case 0xC0: CPY(ReadAtPC()); break;
+	case 0xC0: CPY(Read(MakeImmediate())); break;
 	case 0xC4: CPY(Read(MakeZeroPage())); break;
 	case 0xCC: CPY(Read(MakeAbsolute())); break;
 	case 0xC6: DEC(MakeZeroPage()); break;
@@ -196,7 +325,7 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0xDE: DEC(MakeAbsoluteX()); break; // TODO 7 cycles always, doesn't care about crossing pages
 	case 0xCA: DEX(); break;
 	case 0x88: DEY(); break;
-	case 0x49: EOR(ReadAtPC()); break;
+	case 0x49: EOR(Read(MakeImmediate())); break;
 	case 0x45: EOR(Read(MakeZeroPage())); break;
 	case 0x55: EOR(Read(MakeZeroPageX())); break;
 	case 0x4D: EOR(Read(MakeAbsolute())); break;
@@ -213,7 +342,7 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0x4C: JMP(MakeAbsolute()); break;
 	case 0x6C: JMP(MakeIndirect()); break;
 	case 0x20: JSR(MakeAbsolute()); break;
-	case 0xA9: LDA(ReadAtPC()); break;
+	case 0xA9: LDA(Read(MakeImmediate())); break;
 	case 0xA5: LDA(Read(MakeZeroPage())); break;
 	case 0xB5: LDA(Read(MakeZeroPageX())); break;
 	case 0xAD: LDA(Read(MakeAbsolute())); break;
@@ -221,12 +350,12 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0xB9: LDA(Read(MakeAbsoluteY())); break;
 	case 0xA1: LDA(Read(MakeIndirectX())); break;
 	case 0xB1: LDA(Read(MakeIndirectY())); break;
-	case 0xA2: LDX(ReadAtPC()); break;
+	case 0xA2: LDX(Read(MakeImmediate())); break;
 	case 0xA6: LDX(Read(MakeZeroPage())); break;
 	case 0xB6: LDX(Read(MakeZeroPageY())); break;
 	case 0xAE: LDX(Read(MakeAbsolute())); break;
 	case 0xBE: LDX(Read(MakeAbsoluteY())); break;
-	case 0xA0: LDY(ReadAtPC()); break;
+	case 0xA0: LDY(Read(MakeImmediate())); break;
 	case 0xA4: LDY(Read(MakeZeroPage())); break;
 	case 0xB4: LDY(Read(MakeZeroPageX())); break;
 	case 0xAC: LDY(Read(MakeAbsolute())); break;
@@ -237,7 +366,7 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0x4E: LSR(MakeAbsolute()); break;
 	case 0x5E: LSR(MakeAbsoluteX()); break; // TODO 7 cycles always, doesn't care about crossing pages
 	case 0xEA: NOP(); break;
-	case 0x09: ORA(ReadAtPC()); break;
+	case 0x09: ORA(Read(MakeImmediate())); break;
 	case 0x05: ORA(Read(MakeZeroPage())); break;
 	case 0x15: ORA(Read(MakeZeroPageX())); break;
 	case 0x0D: ORA(Read(MakeAbsolute())); break;
@@ -261,7 +390,7 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0x7E: ROR(MakeAbsoluteX()); break; // TODO 7 cycles always, doesn't care about crossing pages
 	case 0x40: RTI(); break;
 	case 0x60: RTS(); break;
-	case 0xE9: SBC(ReadAtPC()); break;
+	case 0xE9: SBC(Read(MakeImmediate())); break;
 	case 0xE5: SBC(Read(MakeZeroPage())); break;
 	case 0xF5: SBC(Read(MakeZeroPageX())); break;
 	case 0xED: SBC(Read(MakeAbsolute())); break;
@@ -292,6 +421,11 @@ void CPU::ExecuteOpCode(u8 opCode) {
 	case 0x9A: TXS(); break;
 	case 0x98: TYA(); break;
 	default: InvalidOpCode();
+	}
+
+	if (log) {
+		logFile << " A = " << ToHex(tempA) << ", X = " << ToHex(tempX) << ", Y = " << ToHex(tempY);
+		logFile << " P = " << ToHex(tempP) << ", S = " << ToHex(tempS) << std::endl;
 	}
 }
 
@@ -348,6 +482,7 @@ void CPU::INY() {
 }
 
 u8 CPU::LSR_Internal(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	u8 bit0 = M & 0x01;
 	M >>= 1;
 	SetFlag(Flag::C, bit0 > 0);
@@ -358,6 +493,7 @@ u8 CPU::LSR_Internal(u8 M) {
 }
 
 void CPU::LSR() {
+	if (log) logFile << "A";
 	A = LSR_Internal(A);
 }
 
@@ -370,6 +506,7 @@ void CPU::NOP() {
 }
 
 u8 CPU::ROL_Internal(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	u8 bit7 = M & 0x80;
 	M <<= 1;
 	if (HasFlag(Flag::C))
@@ -382,6 +519,7 @@ u8 CPU::ROL_Internal(u8 M) {
 }
 
 void CPU::ROL() {
+	if (log) logFile << "A";
 	A = ROL_Internal(A);
 }
 
@@ -390,6 +528,7 @@ void CPU::ROL(u16 address) {
 }
 
 u8 CPU::ROR_Internal(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	u8 bit0 = M & 0x01;
 	M >>= 1;
 	if (HasFlag(Flag::C))
@@ -402,6 +541,7 @@ u8 CPU::ROR_Internal(u8 M) {
 }
 
 void CPU::ROR() {
+	if (log) logFile << "A";
 	A = ROR_Internal(A);
 }
 
@@ -465,6 +605,7 @@ void CPU::TYA() {
 }
 
 void CPU::ADC(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	u8 C = HasFlag(Flag::C) ? 1 : 0;
 	u16 temp16 = A + M + C;
 	u8 temp8 = (u8)temp16;
@@ -477,12 +618,14 @@ void CPU::ADC(u8 M) {
 }
 
 void CPU::AND(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	A &= M;
 	SetFlag(Flag::Z, A == 0);
 	SetFlag(Flag::N, (A & 0x80) > 0);
 }
 
 void CPU::ASL() {
+	if (log) logFile << "A";
 	A = ASL_Internal(A);
 }
 
@@ -491,6 +634,7 @@ void CPU::ASL(u16 address) {
 }
 
 u8 CPU::ASL_Internal(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	u8 bit7 = M & 0x80;
 	M <<= 1;
 	SetFlag(Flag::C, bit7 > 0);
@@ -502,9 +646,9 @@ u8 CPU::ASL_Internal(u8 M) {
 
 void CPU::BranchWithFlag(Flag Flag, bool Set, s8 AddressOffset) {
 	if (HasFlag(Flag) == Set) {
-		u16 msb = PC & 0xFF00;
+		u8 msb = PC >> 8;
 		PC += AddressOffset;
-		if (msb != (PC & 0xFF00))
+		if (msb != (PC >> 8))
 			CountCycles(2);
 		else
 			CountCycles(1);
@@ -528,8 +672,9 @@ void CPU::BNE(s8 addressOffset) {
 }
 
 void CPU::BIT(u8 M) {
-	M &= A;
-	SetFlag(Flag::Z, M == 0);
+	if (log) logFile << " [M] = " << ToHex(M);
+	u8 bit = A & M;
+	SetFlag(Flag::Z, bit == 0);
 	SetFlag(Flag::V, (M & 0x40) > 0);
 	SetFlag(Flag::N, (M & 0x80) > 0);
 }
@@ -542,12 +687,21 @@ void CPU::BPL(s8 addressOffset) {
 	BranchWithFlag(Flag::N, false, addressOffset);
 }
 
-void CPU::BRK() {
+void CPU::BRK(u16 vectorAddress, bool setB) {
+	if (log)
+		logFile << "brk before: PC = " << ToHex(PC) << ", P = " << ToHex(P) << ", S = " << ToHex(S) << std::endl;
+	
 	ReadAtPC(); // next byte after opcode must be discarded, PC must be incremented
 	Push16(PC);
-	Push8(P | Flag::B);
+	if (setB)
+		Push8(P | Flag::B);
+	else
+		Push8(P);
 	SetFlag(Flag::I, true);
-	PC = Read(0xFFFE) | (Read(0xFFFF) << 8);
+	PC = Read(vectorAddress) | (Read(vectorAddress + 1) << 8);
+
+	if (log)
+		logFile << "brk after: PC = " << ToHex(PC) << ", P = " << ToHex(P) << ", S = " << ToHex(S) << std::endl;
 }
 
 void CPU::BVC(s8 addressOffset) {
@@ -559,10 +713,11 @@ void CPU::BVS(s8 addressOffset) {
 }
 
 void CPU::Compare(u8 R, u8 M) {
-	M = R - M;
-	SetFlag(Flag::C, M > 0);
-	SetFlag(Flag::Z, M == 0);
-	SetFlag(Flag::N, (M & 0x80) > 0);
+	if (log) logFile << " [M] = " << ToHex(M);
+	u8 cmp = R - M;
+	SetFlag(Flag::C, R >= M);
+	SetFlag(Flag::Z, cmp == 0);
+	SetFlag(Flag::N, (cmp & 0x80) > 0);
 }
 
 void CPU::CMP(u8 M) {
@@ -578,7 +733,9 @@ void CPU::CPY(u8 M) {
 }
 
 void CPU::DEC(u16 address) {
-	u8 M = Read(address) - 1;
+	u8 M = Read(address);
+	if (log) logFile << " [M] = " << ToHex(M);
+	M--;
 	SetFlag(Flag::Z, M == 0);
 	SetFlag(Flag::N, (M & 0x80) > 0);
 	CountCycles(1);
@@ -586,13 +743,20 @@ void CPU::DEC(u16 address) {
 }
 
 void CPU:: EOR(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	A ^= M;
 	SetFlag(Flag::Z, A == 0);
 	SetFlag(Flag::N, (A & 0x80) > 0);
 }
 
 void CPU::INC(u16 address) {
-	u8 M = Read(address) + 1;
+	u8 M = Read(address);
+	if (log) logFile << " [M] = " << ToHex(M);
+	M++;
+	if (address == 0x0000 && M == 0)
+		int a = 0;
+	if (address == 0x0000 && M == 0xFF)
+		int a = 0;
 	SetFlag(Flag::Z, M == 0);
 	SetFlag(Flag::N, (M & 0x80) > 0);
 	CountCycles(1);
@@ -616,24 +780,28 @@ void CPU::JSR(u16 Address) {
 }
 
 void CPU::LDA(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	A = M;
 	SetFlag(Flag::Z, A == 0);
 	SetFlag(Flag::N, (A & 0x80) > 0);
 }
 
 void CPU::LDX(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	X = M;
 	SetFlag(Flag::Z, X == 0);
 	SetFlag(Flag::N, (X & 0x80) > 0);
 }
 
 void CPU::LDY(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	Y = M;
 	SetFlag(Flag::Z, Y == 0);
 	SetFlag(Flag::N, (Y & 0x80) > 0);
 }
 
 void CPU::ORA(u8 M) {
+	if (log) logFile << " [M] = " << ToHex(M);
 	A |= M;
 	SetFlag(Flag::Z, A == 0);
 	SetFlag(Flag::N, (A & 0x80) > 0);
@@ -657,7 +825,7 @@ void CPU::PLA() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	IncS();
+	//IncS();
 	A = Pull8();
 }
 
@@ -665,36 +833,42 @@ void CPU::PLP() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	IncS();
+	//IncS();
 	P = Pull8();
 }
 
 void CPU::RTI() {
+	if (log)
+		logFile << "rti before: PC = " << ToHex(PC) << ", P = " << ToHex(P) << ", S = " << ToHex(S) << std::endl;
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	IncS();
+	//IncS();
 	P = Pull8();
-	PC = Pull16();
+	PC = Pull16() - 1;
+	if (log)
+		logFile << "rti after: PC = " << ToHex(PC) << ", P = " << ToHex(P) << ", S = " << ToHex(S) << std::endl;
 }
 
 void CPU::RTS() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	IncS();
+	//IncS();
 	PC = Pull16() + 1;
 	CountCycles(1);
 }
 
 void CPU::SBC(u8 M) {
-	u8 C = !HasFlag(Flag::C) ? 1 : 0;
-	u16 temp16 = A + (0xFF - M - C);
+	if (log) logFile << " [M] = " << ToHex(M);
+	u8 C = HasFlag(Flag::C) ? 1 : 0;
+	u16 temp16 = A - M - (1 - C);
 	u8 temp8 = (u8)temp16;
 	SetFlag(Flag::V, ((A ^ temp8) & (M ^ temp8) & 0x80) > 0); // TODO verificar
 
 	A = temp8;
-	SetFlag(Flag::C, temp16 > 0xFF);
+	if (temp16 > 0xFF)
+		SetFlag(Flag::C, false);
 	SetFlag(Flag::Z, A == 0);
 	SetFlag(Flag::N, (A & 0x80) > 0);
 }

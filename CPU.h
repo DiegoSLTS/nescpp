@@ -2,6 +2,11 @@
 
 #include "Types.h"
 
+#include <fstream>
+#include <sstream>
+
+class NES;
+class PPU;
 class Memory;
 class StateWindow;
 
@@ -20,19 +25,37 @@ class CPU {
 	friend StateWindow;
 public:
 	CPU(Memory& memory);
+	virtual ~CPU();
 
 	u8 A = 0, X = 0, Y = 0;
-	u16 PC = 0;
+	u16 PC;
 	u8 S = 0xFD;
 	u8 P = 0x34;
 
 	u8 lastOpCycles = 0;
 
 	Memory& memory;
+	PPU* ppu = nullptr;
 
+	NES* nes = nullptr;
+
+	void Reset();
 	void Update();
+	void DumpLogs();
+
+	bool NMIRequested = false;
+	
+	void StartOAMDMA(u8 page);
 
 private:
+	std::ofstream logFile;
+	std::stringstream logStrings;
+	bool log = false;
+
+	bool dmaInProgress = false;
+	u16 dmaCycles = 0;
+	u16 dmaAddress = 0;
+
 	void SetFlag(Flag flagBit, bool set);
 	bool HasFlag(Flag flagBit) const;
 
@@ -54,14 +77,18 @@ private:
 	u8 Read(u16 address);
 	void Write(u8 value, u16 address);
 
+	u8 Peak8(u16 address);
+	u16 Peak16(u16 address);
 	u8 PeakOpCode();
 	u8 PeakOperand8();
 	u16 PeakOperand16();
 
 	// addressing modes
+	u16 MakeImmediate();
 	u16 MakeZeroPage();
 	u16 MakeZeroPageX();
 	u16 MakeZeroPageY();
+	u16 MakeRelative();
 	u16 MakeAbsolute();
 	u16 MakeAbsoluteX();
 	u16 MakeAbsoluteY();
@@ -111,7 +138,7 @@ private:
 	void BMI(s8 addressOffset);
 	void BNE(s8 addressOffset);
 	void BPL(s8 addressOffset);
-	void BRK();
+	void BRK(u16 vectorAddress = 0xFFFE, bool setB = true);
 	void BVC(s8 addressOffset);
 	void BVS(s8 addressOffset);
 	void CMP(u8 M);

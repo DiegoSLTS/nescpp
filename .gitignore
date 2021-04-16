@@ -1,0 +1,10 @@
+nescpp.sln
+nescpp.vcxproj
+nescpp.vcxproj.filters
+nescpp.vcxproj.user
+cpu.log
+ppu.log
+.vs/
+Debug/
+Release/
+Roms/
