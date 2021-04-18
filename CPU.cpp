@@ -425,7 +425,7 @@ void CPU::ExecuteOpCode(u8 opCode) {
 
 	if (log) {
 		logFile << " A = " << ToHex(tempA) << ", X = " << ToHex(tempX) << ", Y = " << ToHex(tempY);
-		logFile << " P = " << ToHex(tempP) << ", S = " << ToHex(tempS) << std::endl;
+		logFile << " P = " << ToFlags(tempP) << ", S = " << ToHex(tempS) << std::endl;
 	}
 }
 

@@ -4,7 +4,7 @@ NES::NES(const std::string& romPath) : cartridge(romPath), memory(&cartridge), c
     ppu.cpu = &cpu;
     memory.cpu = &cpu;
     memory.ppu = &ppu;
-    memory.controller = &controller1;
+    memory.controller = &controller;
     cpu.ppu = &ppu;
 
     cpu.nes = this;
@@ -15,8 +15,7 @@ NES::~NES() {}
 void NES::DoInstruction() {
     cpu.Update();
     if (!cycleAccurate) DoCycles(cpu.lastOpCycles);
-    controller1.Update();
-    controller2.Update();
+    controller.Update();
 }
 
 void NES::DoCycles(u8 cpuCycles) {

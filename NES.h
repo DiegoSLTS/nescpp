@@ -12,8 +12,7 @@ public:
 	PPU ppu;
 	Memory memory;
 	Cartridge cartridge;
-	Controller controller1;
-	Controller controller2;
+	Controller controller; // TODO split into 2 controllers
 
 	bool cycleAccurate = false;
 

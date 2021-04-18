@@ -23,6 +23,19 @@ static std::string ToHex(u16 value) {
 	return stream.str();
 }
 
+static std::string ToFlags(u8 value) {
+	std::stringstream stream;
+	stream << (value & 0x80 ? "n" : "-");
+	stream << (value & 0x40 ? "v" : "-");
+	stream << "-";
+	stream << (value & 0x10 ? "b" : "-");
+	stream << (value & 0x08 ? "d" : "-");
+	stream << (value & 0x04 ? "i" : "-");
+	stream << (value & 0x02 ? "z" : "-");
+	stream << (value & 0x01 ? "c" : "-");
+	return stream.str();
+}
+
 // from http://graphics.stanford.edu/~seander/bithacks.html#BitReverseTable
 // Generates a lookup table with each byte value reverted
 // e.g. returns 0x10 for 0x08 (0b0001_0000 for 0b0000_1000)

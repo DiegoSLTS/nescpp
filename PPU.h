@@ -45,7 +45,8 @@ typedef union {
 	struct {
 		bool isBG : 1;
 		bool spriteMatch : 1;
-		u8 paletteIndex : 6;
+		u8 colorIndex : 2;
+		u8 paletteIndex : 2;
 	};
 } PIXELINFOT;
 
@@ -89,10 +90,8 @@ private:
 
 	u32 cyclesCount = 0;
 	u8 xScroll, yScroll = 0;
-	bool PPUSCROLLToX = true;
 	u16 ppuAddress = 0;
 	u16 ppuAddressTemp = 0;
-	bool PPUADDRToMSB = true;
 
 	u8 vram[0x2000] = { 0 };
 	u8 palette[0x20] = { 0 };
@@ -120,13 +119,14 @@ private:
 	u16 lineTargetCycles = 341;
 
 	u8 secondaryOAM[64*4] = { 0 };
+	bool isSprite0InLine = false;
 	u8 spritesInLineCount = 0;
 
 	// cycle ppu
 	u16 vramAddress = 0;
 	u16 tempVramAddress = 0;
 	u8 fineXScroll = 0;
-	bool firstSecondWriteToggle = true;
+	bool firstWrite = true;
 
 	u16 patternShift[2] = { 0 };
 	u8 paletteShift[2] = { 0 };

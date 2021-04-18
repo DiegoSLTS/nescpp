@@ -61,8 +61,7 @@ u8 PPU::Read(u16 address) {
 	case 2: {
 		u8 v = PPUSTATUS.v;
 		PPUSTATUS.VBlank = false;
-		PPUSCROLLToX = true;
-		PPUADDRToMSB = true;
+		firstWrite = true;
 		return v | lastWrittenValue;
 	}
 	case 3: return OAMADDR;
@@ -102,28 +101,25 @@ void PPU::Write(u8 value, u16 address) {
 	case 5: {
 		if (cyclesSinceReset >= 29658) {
 			PPUSCROLL = value;
-			if (PPUSCROLLToX) {
+			if (firstWrite)
 				xScroll = PPUSCROLL;
-				//printf("x %d\n", (u16)xScroll);
-			} else /*if (currentLine < 240)*/ {
+			else
 				yScroll = PPUSCROLL;
-				//printf("y %d\n", (u16)yScroll);
-			}
-			PPUSCROLLToX = !PPUSCROLLToX;
+			firstWrite = !firstWrite;
 		}
 		break;
 	}
 	case 6: {
 		if (cyclesSinceReset >= 29658) {
 			PPUADDR = value;
-			if (PPUADDRToMSB) {
+			if (firstWrite) {
 				ppuAddressTemp = ((PPUADDR & 0x3F) << 8);
 				if (log) logStrings << "Set ppu temp address to " << ToHex(ppuAddressTemp) << std::endl;
 			} else {
 				ppuAddress = ppuAddressTemp | PPUADDR;
 				if (log) logStrings << "Set ppu address to " << ToHex(ppuAddress) << std::endl;
 			}
-			PPUADDRToMSB = !PPUADDRToMSB;
+			firstWrite = !firstWrite;
 		}
 		break;
 	}
@@ -257,8 +253,15 @@ void PPU::DrawCurrentLine() {
 	}
 
 	u32 lineColors[256] = { 0 };
-	for (u16 i = 0; i < 256; i++)
-		lineColors[i] = paletteRGBA[palette[pixels[i].paletteIndex]];
+	for (u16 i = 0; i < 256; i++) {
+		u8 index = 0;
+		if (pixels[i].isBG)
+			index = pixels[i].colorIndex == 0 ? 0 : pixels[i].paletteIndex * 4 + pixels[i].colorIndex;
+		else
+			index = pixels[i].colorIndex == 0 ? 0 : (pixels[i].paletteIndex + 4) * 4 + pixels[i].colorIndex;
+
+		lineColors[i] = paletteRGBA[palette[index]];
+	}
 	
 	gameWindow->DrawLine(currentLine, lineColors);
 }
@@ -314,7 +317,8 @@ void PPU::DrawBackground(PIXELINFOT* pixels) {
 				u8 color = lBit | hBit;
 
 				//if (log) logStrings << "pixel = " << ToHex(pixelIndex) << " c = " << ToHex(c) << std::endl;
-				pixelInfo.paletteIndex = color == 0 ? 0 : attributesShifted * 4 + color;
+				pixelInfo.colorIndex = color;
+				pixelInfo.paletteIndex = attributesShifted;
 			}
 
 			pixels[pixelIndex++] = pixelInfo;
@@ -388,23 +392,23 @@ void PPU::DrawSprites(PIXELINFOT* pixels) {
 			if (pixels[pixelIndex].spriteMatch)
 				continue;
 
-			if (pixels[pixelIndex].isBG && pixels[pixelIndex].paletteIndex != 0 && bgPriority) {
-				pixels[pixelIndex].spriteMatch = true;
-				if (sprite == 0 && pixels[pixelIndex].paletteIndex != 0 && pixelIndex != 255)
-					PPUSTATUS.Sprite0Hit = true;
-				continue;
-			}
-
 			u8 lBit = (lowByte16 >> bit) & 0x01;
 			u8 hBit = (highByte16 >> bit) & 0x02;
 			u8 color = lBit | hBit;
 			if (color != 0) {
-				if (sprite == 0 && pixels[pixelIndex].paletteIndex != 0 && pixelIndex != 255)
+				if (isSprite0InLine && sprite == 0 && pixels[pixelIndex].colorIndex != 0 && pixelIndex != 255 && !PPUSTATUS.Sprite0Hit)
 					PPUSTATUS.Sprite0Hit = true;
+
+				// TODO use color index instead of palette index
+				if (pixels[pixelIndex].isBG && pixels[pixelIndex].colorIndex != 0 && bgPriority) {
+					pixels[pixelIndex].spriteMatch = true;
+					continue;
+				}
 
 				pixels[pixelIndex].isBG = false;
 				pixels[pixelIndex].spriteMatch = true;
-				pixels[pixelIndex].paletteIndex = color == 0 ? 0 : ((attributes & 0x03) + 4) * 4 + color;
+				pixels[pixelIndex].colorIndex = color;
+				pixels[pixelIndex].paletteIndex = attributes & 0x03;
 			}
 		}
 	}
@@ -413,8 +417,9 @@ void PPU::DrawSprites(PIXELINFOT* pixels) {
 void PPU::UpdateLineSprites() {
 	u8 spriteHeight = PPUCTRL.SpriteHeight == 0 ? 8 : 16;
 	spritesInLineCount = 0;
+	isSprite0InLine = false;
 	memset(secondaryOAM, 0xFF, 64*4);
-	for (u16 i = OAMADDR; i < 256; i += 4) {
+	for (u16 i = 0; i < 256; i += 4) {
 		u8 spriteY = oam[i];
 		if (spritesInLineCount < 8) {
 			secondaryOAM[spritesInLineCount * 4] = spriteY;
@@ -422,11 +427,14 @@ void PPU::UpdateLineSprites() {
 				if (log) logStrings << "sprite address " << (int)i << " t " << ToHex(oam[i + 1]) << " x " << ToHex(oam[i + 3]) << std::endl;
 				memcpy(secondaryOAM + spritesInLineCount * 4 + 1, oam + i + 1, 3);
 				spritesInLineCount++;
+				if (i == 0)
+					isSprite0InLine = true;
 			}
 		} else {
 			PPUSTATUS.SpriteOverflow = true;
 			break;
 		}
 	}
+	
 	if (log && spritesInLineCount > 0) logStrings << "line " << (int)currentLine << " sprites count " << (int)spritesInLineCount << std::endl;
 }
