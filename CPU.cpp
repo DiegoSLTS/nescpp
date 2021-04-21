@@ -74,12 +74,24 @@ void CPU::Update() {
 		NMIRequested = false;
 	}
 
+	if (IsIRQRequested()) {
+		if (delayInterruptHandling)
+			delayInterruptHandling = false;
+		else
+			BRK(0xFFFE, true);
+	}
+
 	if (PC == 0xce1e)
 		int a = 0;
 
 	u8 opCode = ReadAtPC();
 	ExecuteOpCode(opCode);
 }
+
+bool CPU::IsIRQRequested() const {
+	return false;
+};
+
 
 void CPU::StartOAMDMA(u8 page) {
 	dmaInProgress = true;
@@ -213,10 +225,10 @@ u16 CPU::MakeIndirect() {
 
 u16 CPU::MakeIndirectX() {
 	if (log) logFile << "($" << ToHex(Peak8(PC)) << ",X)";
-	u16 zpAddress = (ReadAtPC() + X) & 0x00FF;
+	u16 zpAddress = ReadAtPC() + X;
 	CountCycles(1);
-	u8 lsb = Read(zpAddress);
-	u8 msb = Read(zpAddress + 1);
+	u8 lsb = Read(zpAddress & 0x00FF);
+	u8 msb = Read((zpAddress + 1) & 0x00FF);
 	u16 address = (msb << 8) | lsb;
 	if (log) logFile << " ADD = " << ToHex(address);
 	return address;
@@ -238,7 +250,8 @@ u16 CPU::MakeIndirectY() {
 }
 
 void CPU::Push8(u8 Value) {
-	Write(Value, 0x0100 | (S--));
+	Write(Value, 0x0100 | S);
+	S--;
 }
 
 void CPU::Push16(u16 Value) {
@@ -444,6 +457,8 @@ void CPU::CLD() {
 }
 
 void CPU::CLI() {
+	if (IsIRQRequested() && HasFlag(Flag::I))
+		delayInterruptHandling = true;
 	SetFlag(Flag::I, false);
 	CountCycles(1);
 }
@@ -687,16 +702,20 @@ void CPU::BPL(s8 addressOffset) {
 	BranchWithFlag(Flag::N, false, addressOffset);
 }
 
-void CPU::BRK(u16 vectorAddress, bool setB) {
+void CPU::BRK(u16 vectorAddress, bool isInterrupt) {
 	if (log)
 		logFile << "brk before: PC = " << ToHex(PC) << ", P = " << ToHex(P) << ", S = " << ToHex(S) << std::endl;
 	
-	ReadAtPC(); // next byte after opcode must be discarded, PC must be incremented
+	// BRK instruction must increment PC (there's an extra read but the value is not used)
+	// NIM and IRQ does the read, but PC is NOT incremented
+	if (!isInterrupt)
+		PC++;
+
 	Push16(PC);
-	if (setB)
-		Push8(P | Flag::B);
+	if (!isInterrupt)
+		Push8(P | 0x30);
 	else
-		Push8(P);
+		Push8(P | 0x20);
 	SetFlag(Flag::I, true);
 	PC = Read(vectorAddress) | (Read(vectorAddress + 1) << 8);
 
@@ -769,10 +788,11 @@ void CPU::JMP(u16 Address) {
 
 void CPU::JSR(u16 Address) {
 	CountCycles(1);
-	// The 6502 actually pushes the PC to the stack after reading
-	// the lsb of the absolute address, so the pushed value is not
-	// the address of the next instruction (PC is still one byte behind).
-	// RTI increments it when pulling PC to compensate
+	// PC is incremented while reading Address (absolute addressing), but
+	// the 6502 actually pushes the PC to the stack after reading the lsb
+	// of Address, so the pushed value is not the address of the next
+	// instruction (PC is still one byte behind).
+	// RTS increments it when pulling PC to compensate
 	Push16(PC - 1);
 
 	PC = Address;
@@ -818,23 +838,28 @@ void CPU::PHP() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	Push8(P | Flag::B);
+	Push8(P | 0x30);
 }
 
 void CPU::PLA() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	//IncS();
 	A = Pull8();
+	SetFlag(Flag::Z, A == 0);
+	SetFlag(Flag::N, (A & 0x80 ) > 0);
 }
 
 void CPU::PLP() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	//IncS();
-	P = Pull8();
+	u8 PFromStack = Pull8() & 0xCF;
+
+	if (IsIRQRequested() && HasFlag(Flag::I) && ((PFromStack & Flag::I) == 0))
+		delayInterruptHandling = true;
+
+	P = PFromStack;
 }
 
 void CPU::RTI() {
@@ -843,9 +868,8 @@ void CPU::RTI() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	//IncS();
-	P = Pull8();
-	PC = Pull16() - 1;
+	P = Pull8() & 0xCF;
+	PC = Pull16();
 	if (log)
 		logFile << "rti after: PC = " << ToHex(PC) << ", P = " << ToHex(P) << ", S = " << ToHex(S) << std::endl;
 }
@@ -854,23 +878,13 @@ void CPU::RTS() {
 	// 6502 reads the byte at PC but does nothing with it
 	// and doesn't increment it
 	CountCycles(1);
-	//IncS();
 	PC = Pull16() + 1;
 	CountCycles(1);
 }
 
 void CPU::SBC(u8 M) {
-	if (log) logFile << " [M] = " << ToHex(M);
-	u8 C = HasFlag(Flag::C) ? 1 : 0;
-	u16 temp16 = A - M - (1 - C);
-	u8 temp8 = (u8)temp16;
-	SetFlag(Flag::V, ((A ^ temp8) & (M ^ temp8) & 0x80) > 0); // TODO verificar
-
-	A = temp8;
-	if (temp16 > 0xFF)
-		SetFlag(Flag::C, false);
-	SetFlag(Flag::Z, A == 0);
-	SetFlag(Flag::N, (A & 0x80) > 0);
+	// https://stackoverflow.com/questions/29193303/6502-emulation-proper-way-to-implement-adc-and-sbc
+	ADC(~M);
 }
 
 void CPU::STA(u16 Address) {

@@ -31,7 +31,7 @@ u8 Controller::Read(u16 address) {
 	u8* statePtr = address == 0x4016 ? &controller1State : &controller2State;
 	u8 state = *statePtr;
 	u8 bit = state & 0x01;
-	if (reg == 0) {
+	if ((reg & 0x01) == 0) {
 		state >>= 1;
 		state |= 0x80;
 		*statePtr = state;
@@ -45,7 +45,7 @@ void Controller::Write(u8 value, u16 address) {
 }
 
 void Controller::Update() {
-	if (reg == 0)
+	if ((reg & 0x01) == 0)
 		return;
 
 	controller1State = 0;

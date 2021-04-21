@@ -91,7 +91,12 @@ void PPU::Write(u8 value, u16 address) {
 		}
 		break;
 	}
-	case 2: PPUSTATUS.v = value & 0xE0; break;
+	case 2: {
+		bool vblank = PPUSTATUS.VBlank;
+		PPUSTATUS.v = value & 0xE0;
+		PPUSTATUS.VBlank = vblank;
+		break;
+	}
 	case 3: OAMADDR = value & 0x00FF; break;
 	case 4: {
 		OAMDATA = value;
@@ -186,15 +191,13 @@ u8 PPU::MirroredVRAMRead(u16 ppuAddress) {
 }
 
 void PPU::InternalOAMWrite() {
-	if (currentLine == 262 || currentLine < 240)
-		return; //TODO glitch increment?
-
 	if (log) logStrings << "oam[" << ToHex(OAMADDR) << "] = " << ToHex(OAMDATA) << std::endl;
-	oam[OAMADDR] = OAMDATA;
-	if (OAMADDR == 0xFF)
-		OAMADDR = 0;
-	else
+	if ((currentLine == 262 || currentLine < 240) && (PPUMASK.BGEnabled || PPUMASK.SpritesEnabled))
+		OAMADDR += 0x04;
+	else {
+		oam[OAMADDR] = OAMDATA;
 		OAMADDR++;
+	}
 }
 
 bool PPU::Update(u8 cycles) {

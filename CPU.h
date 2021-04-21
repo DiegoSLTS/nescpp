@@ -29,8 +29,8 @@ public:
 
 	u8 A = 0, X = 0, Y = 0;
 	u16 PC;
-	u8 S = 0xFD;
-	u8 P = 0x34;
+	u8 S = 0;
+	u8 P = 0x04;
 
 	u8 lastOpCycles = 0;
 
@@ -44,6 +44,8 @@ public:
 	void DumpLogs();
 
 	bool NMIRequested = false;
+	bool delayInterruptHandling = false;
+	bool IsIRQRequested() const;
 	
 	void StartOAMDMA(u8 page);
 
@@ -138,7 +140,7 @@ private:
 	void BMI(s8 addressOffset);
 	void BNE(s8 addressOffset);
 	void BPL(s8 addressOffset);
-	void BRK(u16 vectorAddress = 0xFFFE, bool setB = true);
+	void BRK(u16 vectorAddress = 0xFFFE, bool isInterrupt = false);
 	void BVC(s8 addressOffset);
 	void BVS(s8 addressOffset);
 	void CMP(u8 M);
