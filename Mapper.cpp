@@ -83,9 +83,10 @@ void Mapper::InitArrays(const char* fileContent) {
 			chrNVRAMSize = 64 << header.ChrNVRAMShiftCount;
 	}
 
-	prgRom = new u8[prgROMSize];
-	chrRom = new u8[chrROMSize];
-
+	if (prgROMSize > 0)
+		prgRom = new u8[prgROMSize];
+	if (chrROMSize > 0)
+		chrRom = new u8[chrROMSize];
 	if (prgRAMSize > 0)
 		prgRam = new u8[prgRAMSize];
 	if (prgNVRAMSize > 0)
@@ -99,11 +100,16 @@ void Mapper::InitArrays(const char* fileContent) {
 	if (header.HasTrainer)
 		romStart += 512;
 
-	memcpy(prgRom, fileContent + romStart, prgROMSize);
-	memcpy(chrRom, fileContent + romStart + prgROMSize, chrROMSize);
+	if (prgRom != nullptr)
+		memcpy(prgRom, fileContent + romStart, prgROMSize);
+	if (chrRom != nullptr)
+		memcpy(chrRom, fileContent + romStart + prgROMSize, chrROMSize);
 }
 
-Mapper0::Mapper0(const Header& header, const char* fileContent) : Mapper(header, fileContent) {}
+Mapper0::Mapper0(const Header& header, const char* fileContent) : Mapper(header, fileContent) {
+	if (chrRom == nullptr)
+		chrRam = new u8[8 * 1024];
+}
 
 u8 Mapper0::Read(u16 address) {
 	if (address < 0x6000)
@@ -124,11 +130,17 @@ u8 Mapper0::Read(u16 address) {
 void Mapper0::Write(u8 value, u16 address) {
 	if (address >= 0x6000 && address < 0x8000 && prgRam != nullptr)
 		prgRam[address - 0x6000] = value;
+	else if (address < 8 * 1024 && chrRam != nullptr)
+		chrRam[address] = value;
 }
 
 u8 Mapper0::ReadChr(u16 address) {
-	if (address < 0x2000)
-		return chrRom[address];
+	if (address < 0x2000) {
+		if (chrRom != nullptr)
+			return chrRom[address];
+		if (chrRam != nullptr)
+			return chrRam[address];
+	}
 
 	return 0;
 }

@@ -2,7 +2,6 @@
 
 #include "Types.h"
 
-#include <fstream>
 #include <sstream>
 
 typedef union {
@@ -50,6 +49,20 @@ typedef union {
 	};
 } PIXELINFOT;
 
+typedef union {
+	u16 v;
+	struct {
+		u8 coarseX : 5;
+		u8 coarseY : 5;
+		u8 nameTable : 2;
+		u8 fineY : 3;
+	};
+	struct {
+		u8 lsb;
+		u8 msb;
+	};
+} VRAMAddressT;
+
 class CPU;
 class Cartridge;
 class GameWindow;
@@ -61,10 +74,9 @@ class PPU {
 	friend class GameWindow;
 public:
 	PPU(Cartridge* cart);
-	virtual ~PPU();
 	// return true if frame finished
 	bool Update(u8 cycles);
-	void DumpLogs();
+	void Reset();
 
 	u8 Read(u16 address);
 	void Write(u8 value, u16 address);
@@ -74,14 +86,12 @@ public:
 	GameWindow* gameWindow = nullptr;
 
 private:
-	std::ofstream logFile;
-	std::stringstream logStrings;
+	std::stringstream* logStream;
 	bool log = false;
 
 	PPUCTRLT PPUCTRL = { 0x00 }; // $2000
 	PPUMASKT PPUMASK = { 0x00 }; // $2001
-	PPUSTATUST PPUSTATUS; // $2002
-	u8 lastWrittenValue = 0; // reading PPUSTATUS returns bits 0-5 from this previous value
+	PPUSTATUST PPUSTATUS = { 0x00 }; // $2002
 	u8 OAMADDR = 0; // $2003
 	u8 OAMDATA = 0; // $2004
 	u8 PPUSCROLL = 0; // $2005
@@ -105,14 +115,16 @@ private:
 	u8 MirroredVRAMRead(u16 ppuAddress);
 	void InternalOAMWrite();
 	u8 readBuffer = 0;
+	u8 ioBus = 0; //TODO decay to 0 after 1 second
 
 	void DrawCurrentLine();
 	void DrawBackground(PIXELINFOT* pixels);
+	void DrawBackground2(PIXELINFOT* pixels);
 	void DrawSprites(PIXELINFOT* pixels);
 	void UpdateLineSprites();
 
 	bool oddFrame = false;
-	u16 currentLine = 0;
+	u16 currentLine = 242;
 	u16 lineCycles = 0;
 	u32 frameCycles = 0;
 	u32 cyclesSinceReset = 0;
@@ -123,8 +135,8 @@ private:
 	u8 spritesInLineCount = 0;
 
 	// cycle ppu
-	u16 vramAddress = 0;
-	u16 tempVramAddress = 0;
+	u16 vramAddress = { 0x00 };
+	u16 tempVramAddress = { 0x00 };
 	u8 fineXScroll = 0;
 	bool firstWrite = true;
 

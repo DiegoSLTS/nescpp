@@ -1,6 +1,8 @@
 #include <iostream>
 #include <chrono>
 
+#include "Logger.h"
+
 #include "GameWindow.h"
 #include "StateWindow.h"
 #include "NameTableWindow.h"
@@ -10,8 +12,16 @@
 
 #include "NES.h"
 
+const static std::string basefolder = "";
+const static std::string testfolder = "stress";
+const static std::string testrom = "NEStress";
+const static std::string romfolder = "";
+const static std::string rom = "";
+
 int main(int argc, char* argv[]) {
-    std::string romPath(argv[1]);
+    Logger::Init();
+    std::string romPath(basefolder + "nes-test-roms-master/" + testfolder + "/" + testrom + ".nes");
+    //std::string romPath(basefolder + rom + ".zip");
     std::string romDir;
     std::string romName;
     std::string gameName;
@@ -59,7 +69,7 @@ int main(int argc, char* argv[]) {
                 printf("FPS: %d\n", framesCount);
                 previousFPSTime = currentTime;
                 framesCount = 0;
-                nes.DumpLogs();
+                Logger::DumpLogs();
             }
         }
 
@@ -78,6 +88,8 @@ int main(int argc, char* argv[]) {
                     stateWindow.Toggle();
                 else if (event.key.code == sf::Keyboard::Num5)
                     palettesWindow.Toggle();
+                else if (event.key.code == sf::Keyboard::R)
+                    nes.Reset();
             }
         }
 
@@ -88,6 +100,6 @@ int main(int argc, char* argv[]) {
     for (auto it = debugWindows.begin(); it != debugWindows.end(); it++)
         (*it)->Close();
     debugWindows.clear();
-
+    Logger::DumpLogs();
 	return 0;
 }

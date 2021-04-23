@@ -25,9 +25,5 @@ void NES::DoCycles(u8 cpuCycles) {
 
 void NES::Reset() {
     cpu.Reset();
-}
-
-void NES::DumpLogs() {
-    cpu.DumpLogs();
-    ppu.DumpLogs();
+    ppu.Reset();
 }

@@ -2,7 +2,6 @@
 
 #include "Types.h"
 
-#include <fstream>
 #include <sstream>
 
 class NES;
@@ -25,7 +24,6 @@ class CPU {
 	friend StateWindow;
 public:
 	CPU(Memory& memory);
-	virtual ~CPU();
 
 	u8 A = 0, X = 0, Y = 0;
 	u16 PC;
@@ -33,6 +31,8 @@ public:
 	u8 P = 0x04;
 
 	u8 lastOpCycles = 0;
+	unsigned long cpuCycles = 0;
+	unsigned long instructionsCount = 0;
 
 	Memory& memory;
 	PPU* ppu = nullptr;
@@ -41,7 +41,6 @@ public:
 
 	void Reset();
 	void Update();
-	void DumpLogs();
 
 	bool NMIRequested = false;
 	bool delayInterruptHandling = false;
@@ -50,8 +49,7 @@ public:
 	void StartOAMDMA(u8 page);
 
 private:
-	std::ofstream logFile;
-	std::stringstream logStrings;
+	std::stringstream* logStream;
 	bool log = false;
 
 	bool dmaInProgress = false;
@@ -92,11 +90,11 @@ private:
 	u16 MakeZeroPageY();
 	u16 MakeRelative();
 	u16 MakeAbsolute();
-	u16 MakeAbsoluteX();
-	u16 MakeAbsoluteY();
+	u16 MakeAbsoluteX(bool alwaysExtraCycle = false);
+	u16 MakeAbsoluteY(bool alwaysExtraCycle = false);
 	u16 MakeIndirect();
 	u16 MakeIndirectX();
-	u16 MakeIndirectY();
+	u16 MakeIndirectY(bool alwaysExtraCycle = false);
 	//
 
 	// instructions

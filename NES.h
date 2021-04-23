@@ -24,5 +24,4 @@ public:
 	void DoInstruction();
 	void DoCycles(u8 cpuCycles);
 	void Reset();
-	void DumpLogs();
 };
