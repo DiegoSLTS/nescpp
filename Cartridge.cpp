@@ -176,7 +176,8 @@ void Cartridge::LoadFile(const std::string& path) {
 
 void Cartridge::InitMapper(const char* fileContent) {
     switch (header.Mapper) {
-    case 0: mapper = new Mapper0(header, fileContent);
+    case 0: mapper = new Mapper0(header, fileContent); break;
+    case 1: mapper = new Mapper1(header, fileContent); break;
     }
 
     if (mapper == nullptr) {

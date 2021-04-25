@@ -140,7 +140,7 @@ void PPU::Write(u8 value, u16 address) {
 				ppuAddress = ppuAddressTemp | PPUADDR;
 				tempVramAddress &= 0x7F00;
 				tempVramAddress |= value;
-				vramAddress |= tempVramAddress;
+				vramAddress = tempVramAddress;
 				if (log) (*logStream) << "Set address to " << ToHex(vramAddress) << " (" << ToHex(value) << ")" << std::endl;
 				//if (log) (*logStream) << "Set ppu address to " << ToHex(ppuAddress) << std::endl;
 			}
@@ -235,6 +235,11 @@ bool PPU::Update(u8 cycles) {
 
 	u16 temp = lineCycles + cycles;
 	
+	if (lineCycles < 65 && temp >= 65)
+		oamAddForSprites = OAMADDR;
+	/*else if (temp >= 257 && temp <= 320)
+		OAMADDR = 0;*/
+
 	if (lineCycles < 260 && temp >= 260 && currentLine <= 239)
 		DrawCurrentLine();
 
@@ -532,7 +537,7 @@ void PPU::DrawSprites(PIXELINFOT* pixels) {
 			u8 hBit = (highByte16 >> bit) & 0x02;
 			u8 color = lBit | hBit;
 			if (color != 0) {
-				if (isSprite0InLine && sprite == 0 && pixels[pixelIndex].colorIndex != 0 && pixelIndex != 255 && !PPUSTATUS.Sprite0Hit)
+				if (/*isSprite0InLine &&*/ sprite == 0 && pixels[pixelIndex].colorIndex != 0 && pixelIndex != 255 && !PPUSTATUS.Sprite0Hit)
 					PPUSTATUS.Sprite0Hit = true;
 
 				// TODO use color index instead of palette index
@@ -553,23 +558,24 @@ void PPU::DrawSprites(PIXELINFOT* pixels) {
 void PPU::UpdateLineSprites() {
 	u8 spriteHeight = PPUCTRL.SpriteHeight == 0 ? 8 : 16;
 	spritesInLineCount = 0;
-	isSprite0InLine = false;
 	memset(secondaryOAM, 0xFF, 64*4);
-	for (u16 i = 0; i < 256; i += 4) {
-		u8 spriteY = oam[i];
+	u8 address = oamAddForSprites;
+	if (log) (*logStream) << "sprite evaluation from " << ToHex(address) << std::endl;
+	for (u8 s = 0; s < 64; s++) {
+		u8 spriteY = oam[address];
 		if (spritesInLineCount < 8) {
 			secondaryOAM[spritesInLineCount * 4] = spriteY;
 			if (currentLine >= spriteY && currentLine < spriteY + spriteHeight) {
-				if (log) (*logStream) << "sprite address " << (int)i << " t " << ToHex(oam[i + 1]) << " x " << ToHex(oam[i + 3]) << std::endl;
-				memcpy(secondaryOAM + spritesInLineCount * 4 + 1, oam + i + 1, 3);
+				if (log) (*logStream) << "sprite address " << ToHex(address) << " t " << ToHex(oam[address + 1]) << " x " << ToHex(oam[address + 3]) << std::endl;
+				memcpy(secondaryOAM + spritesInLineCount * 4 + 1, oam + address + 1, 3);
 				spritesInLineCount++;
-				if (i == 0)
-					isSprite0InLine = true;
 			}
 		} else {
 			PPUSTATUS.SpriteOverflow = true;
 			break;
 		}
+		address += 4;
+		address &= 0xFF;
 	}
 	
 	if (log && spritesInLineCount > 0) (*logStream) << "line " << (int)currentLine << " sprites count " << (int)spritesInLineCount << std::endl;

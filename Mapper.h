@@ -4,7 +4,9 @@
 
 enum MirroringMode {
 	Horizontal,
-	Vertical
+	Vertical,
+	OneScreenLower,
+	OneScreenUpper
 };
 
 enum HeaderFormat {
@@ -120,4 +122,23 @@ public:
 	virtual u8 ReadChr(u16 address) override;
 
 	virtual MirroringMode GetMirroring() const;
+};
+
+class Mapper1 : public Mapper {
+public:
+	Mapper1(const Header& header, const char* fileContent);
+
+	virtual u8 Read(u16 address) override;
+	virtual void Write(u8 value, u16 address) override;
+
+	virtual u8 ReadChr(u16 address) override;
+
+	virtual MirroringMode GetMirroring() const;
+
+private:
+	u8 loadRegister = 0x10;
+	u8 control = 0x0C;
+	u8 chrBank0 = 0;
+	u8 chrBank1 = 0;
+	u8 prgBank = 0x0F;
 };

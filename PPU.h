@@ -122,6 +122,7 @@ private:
 	void DrawBackground2(PIXELINFOT* pixels);
 	void DrawSprites(PIXELINFOT* pixels);
 	void UpdateLineSprites();
+	u8 oamAddForSprites = 0;
 
 	bool oddFrame = false;
 	u16 currentLine = 242;
